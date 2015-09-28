@@ -1,41 +1,312 @@
-# Compiled Lua sources
-luac.out
+local IOWversion = 1.98 
+2 local myHeroName = GetObjectName(GetMyHero()) 
+3 
+ 
+4 class "InspiredsOrbWalker" 
+5 
+ 
+6 function InspiredsOrbWalker:__init() 
+7   self.lastAttack = 0 
+8   self.lastCooldown = 0 
+9   self.attacksEnabled = true 
+10   self.movementEnabled = true 
+11   self.altAttacks = Set { "caitlynheadshotmissile", "frostarrow", "garenslash2", "kennenmegaproc", "lucianpassiveattack", "masteryidoublestrike", "quinnwenhanced", "renektonexecute", "renektonsuperexecute", "rengarnewpassivebuffdash", "trundleq", "xenzhaothrust", "xenzhaothrust2", "xenzhaothrust3" } 
+12   self.resetAttacks = Set { "dariusnoxiantacticsonh", "fioraflurry", "garenq", "hecarimrapidslash", "jaxempowertwo", "jaycehypercharge", "leonashieldofdaybreak", "luciane", "lucianq", "monkeykingdoubleattack", "mordekaisermaceofspades", "nasusq", "nautiluspiercinggaze", "netherblade", "parley", "poppydevastatingblow", "powerfist", "renektonpreexecute", "rengarq", "shyvanadoubleattack", "sivirw", "takedown", "talonnoxiandiplomacy", "trundletrollsmash", "vaynetumble", "vie", "volibearq", "xenzhaocombotarget", "yorickspectral", "reksaiq", "riventricleave", "itemtitanichydracleave", "itemtiamatcleave" } 
+13   self.rangeCircle = GoS:Circle(GoS.White) 
+14   self.tick = 0 
+15   self:MakeMenu() 
+16   OnLoop(function() self:Loop() end) 
+17   OnProcessSpell(function(x,y) self:ProcessSpell(x,y) end) 
+18   OnProcessWaypoint(function(x,y) self:ProcessWaypoint(x,y) end) 
+19   return self 
+20 end 
+21 
+ 
+22 function Set(list) 
+23   local set = {} 
+24   for _, l in ipairs(list) do  
+25     set[l] = true  
+26   end 
+27   return set 
+28 end 
+29 
+ 
+30 function msg(x) 
+31   Msg(x, "InspiredsOrbWalker") 
+32 end 
+33 
+ 
+34 function InspiredsOrbWalker:MakeMenu() 
+35   self.Config = Menu("Inspired'sOrbWalker", "IOW") 
+36   self.Config:SubMenu("h", "Hotkeys") 
+37   self.Config.h:Key("Combo", "Combo", 32) 
+38   self.Config.h:Key("Harass", "Harass", string.byte("C")) 
+39   self.Config.h:Key("LastHit", "LastHit", string.byte("X")) 
+40   self.Config.h:Key("LaneClear", "LaneClear", string.byte("V")) 
+41   self.Config:Slider("cad", "Cancel Adjustment", 0, -100, 100, 1) 
+42   self.Config:List("lcm", "Lane Clear method", myHeroName == "Vayne" and 2 or 1, {"Focus Highest", "Stick to 1"}) 
+43   self.Config:Boolean("items", "Use Items", true) 
+44   GoS:DelayAction(function() 
+45     if GetRange(myHero) < 450 then 
+46       self.Config:Boolean("sticky", "Stick to Target", true) 
+47     end 
+48     self.rangeCircle.Attach(myHero, GetRange(myHero)+GetHitBox(myHero)) 
+49     self.Config:Boolean("drawcircle", "Autoattack Circle", true) 
+50     self.Config:Info("space", "") 
+51     self.Config:Info("version", "Version: v"..IOWversion) 
+52     self.loaded = true 
+53     msg("Loaded!") 
+54   end, 1000) 
+55 end 
+56 
+ 
+57 function InspiredsOrbWalker:Mode() 
+58   if self.Config.h.Combo:Value() then 
+59     return "Combo" 
+60   elseif self.Config.h.Harass:Value() then 
+61     return "Harass" 
+62   elseif self.Config.h.LastHit:Value() then 
+63     return "LastHit" 
+64   elseif self.Config.h.LaneClear:Value() then 
+65     return "LaneClear" 
+66   else 
+67     return "" 
+68   end 
+69 end 
+70 
+ 
+71 function InspiredsOrbWalker:Loop() 
+72   if not self.loaded or self.tick > GetTickCount() then return end 
+73   self.tick = GetTickCount() + 60 
+74   self.rangeCircle.Draw(self.Config.drawcircle:Value()) 
+75   self.myRange = GetRange(myHero)+GetHitBox(myHero)+(self.Target and GetHitBox(self.Target) or GetHitBox(myHero)) 
+76   self.Target = self:GetTarget() 
+77   self:Orb(self:GetTarget()) 
+78 end 
+79 
+ 
+80 function InspiredsOrbWalker:GetTarget() 
+81   if self.Config.h.Combo:Value() then 
+82     return GoS:GetTarget(self.myRange, DAMAGE_PHYSICAL) 
+83   elseif self.Config.h.Harass:Value() then 
+84     for i=1, minionManager.maxObjects do 
+85       local minion = minionManager.objects[i] 
+86       if minion and IsObjectAlive(minion) and GetTeam(minion) ~= GetTeam(myHero) and GoS:IsInDistance(minion, self.myRange) then 
+87         local health = GoS:PredictHealth(minion, 1000*GoS:GetDistance(minion)/GoS:GetProjectileSpeed(myHero) + GetWindUp(myHero)*1000) 
+88         if health < self:GetDmg(minion) and health > 0 then 
+89           return minion 
+90         end 
+91       end 
+92     end 
+93     return GoS:ValidTarget(self.Target, self.myRange) and self.Target or GoS:GetTarget(self.myRange, DAMAGE_PHYSICAL) 
+94   elseif self.Config.h.LaneClear:Value() then 
+95     local highestMinion, highestHealth = nil, 0 
+96     for i=1, minionManager.maxObjects do 
+97       local minion = minionManager.objects[i] 
+98       if minion and IsObjectAlive(minion) and GetTeam(minion) ~= GetTeam(myHero) and GoS:IsInDistance(minion, self.myRange) then 
+99         local health = GoS:PredictHealth(minion, 1000*GoS:GetDistance(minion)/GoS:GetProjectileSpeed(myHero) + GetWindUp(myHero)*1000) 
+100         local health2 = GoS:PredictHealth(minion, 2000*GoS:GetDistance(minion)/GoS:GetProjectileSpeed(myHero) + GetWindUp(myHero)*2000) 
+101         if not highestMinion then highestMinion = minion highestHealth = health end 
+102         if health > 0 then 
+103           local dmg = self:GetDmg(minion)  
+104           if (health2 < 0 or health2 < dmg*2) and health > dmg and health ~= GetCurrentHP(minion) then 
+105             return nil 
+106           end 
+107           if health < dmg then 
+108             return minion 
+109           elseif self.Config.lcm:Value() == 1 and health > highestHealth then 
+110             highestHealth = health  
+111             highestMinion = minion 
+112           elseif self.Config.lcm:Value() == 2 then 
+113             if GoS:ValidTarget(self.Target) and GetObjectType(self.Target) ~= Obj_AI_Hero then 
+114               return self.Target 
+115             elseif health > highestHealth then 
+116               highestHealth = health  
+117               highestMinion = minion 
+118             end 
+119           end 
+120         end 
+121       end 
+122     end 
+123     return highestMinion 
+124   elseif self.Config.h.LastHit:Value() then 
+125     for i=1, minionManager.maxObjects do 
+126       local minion = minionManager.objects[i] 
+127       if minion and IsObjectAlive(minion) and GetTeam(minion) ~= GetTeam(myHero) and GoS:IsInDistance(minion, self.myRange) then 
+128         local health = GoS:PredictHealth(minion, 1000*GoS:GetDistance(minion)/GoS:GetProjectileSpeed(myHero) + GetWindUp(myHero)*1000) 
+129         if health < self:GetDmg(minion) and health > 0 then 
+130           return minion 
+131         end 
+132       end 
+133     end 
+134   end 
+135 end 
+136 
+ 
+137 function InspiredsOrbWalker:GetDmg(to) -- thanks to Sir Deftsu for this :3 
+138   local addmg = 0 
+139   local apdmg = 0 
+140   local truedmg = 0 
+141   if myHeroName == "Aatrox" then 
+142   addmg = addmg + (GotBuff(myHero, "aatroxwpower") > 0 and 35*GetCastLevel(myHero,_W)+25 or 0) 
+143   elseif myHeroName == "Ashe" then 
+144   addmg = addmg + (GotBuff(myHero, "asheqattack") > 0 and (GetBonusDmg(myHero)+GetBaseDamage(myHero))*(.05*GetCastLevel(myHero,_Q)+.1) or 0) 
+145   elseif myHeroName == "Blitzcrank" then 
+146   addmg = addmg + (GotBuff(myHero, "PowerFist") > 0 and GetBonusDmg(myHero)+GetBaseDamage(myHero) or 0) 
+147   elseif myHeroName == "Caitlyn" then 
+148   addmg = addmg + (GotBuff(myHero, "caitlynheadshot") > 0 and 1.5*(GetBonusDmg(myHero)+GetBaseDamage(myHero)) or 0) 
+149   elseif myHeroName == "Chogath" then 
+150   apdmg = apdmg + (GotBuff(myHero, "VorpalSpikes") > 0 and 15*GetCastLevel(myHero,_E)+5+.3*GetBonusAP(myHero) or 0) 
+151   elseif myHeroName == "Corki" then 
+152   truedmg = truedmg + (GotBuff(myHero, "rapidreload") > 0 and .1*(GetBonusDmg(myHero)+GetBaseDamage(myHero)) or 0) 
+153   elseif myHeroName == "Darius" then 
+154   addmg = addmg + (GotBuff(myHero, "DariusNoxianTacticsONH") > 0 and .4*(GetBonusDmg(myHero)+GetBaseDamage(myHero)) or 0) 
+155   elseif myHeroName == "Diana" then 
+156   apdmg = apdmg + (GotBuff(myHero, "dianaarcready") > 0 and math.max(5*GetLevel(myHero)+15,10*GetLevel(myHero)-10,15*GetLevel(myHero)-60,20*GetLevel(myHero)-125,25*GetLevel(myHero)-200)+.8*GetBonusAP(myHero) or 0) 
+157   elseif myHeroName == "Draven" then 
+158   addmg = addmg + (GotBuff(myHero, "dravenspinning") > 0 and (.1*GetCastLevel(myHero,_Q)+.35)*(GetBonusDmg(myHero)+GetBaseDamage(myHero)) or 0) 
+159   elseif myHeroName == "Ekko" then 
+160   apdmg = apdmg + (GotBuff(myHero, "ekkoeattackbuff") > 0 and 30*GetCastLevel(myHero,_E)+20+.2*GetBonusAP(myHero) or 0) 
+161   elseif myHeroName == "Fizz" then 
+162   apdmg = apdmg + (GotBuff(myHero, "FizzSeastonePassive") > 0 and 5*GetCastLevel(myHero,_W)+5+.3*GetBonusAP(myHero) or 0) 
+163   elseif myHeroName == "Garen" then 
+164   addmg = addmg + (GotBuff(myHero, "GarenQ") > 0 and 25*GetCastLevel(myHero,_Q)+5+.4*(GetBonusDmg(myHero)+GetBaseDamage(myHero)) or 0) 
+165   elseif myHeroName == "Gragas" then 
+166   apdmg = apdmg + (GotBuff(myHero, "gragaswattackbuff") > 0 and 30*GetCastLevel(myHero,_W)-10+.3*GetBonusAP(myHero)+(.01*GetCastLevel(myHero,_W)+.07)*GetMaxHP(minion) or 0) 
+167   elseif myHeroName == "Irelia" then 
+168   truedmg = truedmg + (GotBuff(myHero, "ireliahitenstylecharged") > 0 and 25*GetCastLevel(myHero,_Q)+5+.4*(GetBonusDmg(myHero)+GetBaseDamage(myHero)) or 0) 
+169   elseif myHeroName == "Jax" then 
+170   apdmg = apdmg + (GotBuff(myHero, "JaxEmpowerTwo") > 0 and 35*GetCastLevel(myHero,_W)+5+.6*GetBonusAP(myHero) or 0) 
+171   elseif myHeroName == "Jayce" then 
+172   apdmg = apdmg + (GotBuff(myHero, "jaycepassivemeleeatack") > 0 and 40*GetCastLevel(myHero,_R)-20+.4*GetBonusAP(myHero) or 0) 
+173   elseif myHeroName == "Jinx" then 
+174   addmg = addmg + (GotBuff(myHero, "JinxQ") > 0 and .1*(GetBonusDmg(myHero)+GetBaseDamage(myHero)) or 0) 
+175   elseif myHeroName == "Kassadin" then 
+176   apdmg = apdmg + (GotBuff(myHero, "netherbladebuff") > 0 and 20+.1*GetBonusAP(myHero) or 0) + (GotBuff(myHero, "NetherBlade") > 0 and 25*GetCastLevel(myHero,_W)+15+.6*GetBonusAP(myHero) or 0) 
+177   elseif myHeroName == "Kayle" then 
+178   apdmg = apdmg + (GotBuff(myHero, "kaylerighteousfurybuff") > 0 and 5*GetCastLevel(myHero,_E)+5+.15*GetBonusAP(myHero) or 0) + (GotBuff(myHero, "JudicatorRighteousFury") > 0 and 5*GetCastLevel(myHero,_E)+5+.15*GetBonusAP(myHero) or 0) 
+179   elseif myHeroName == "Leona" then 
+180   apdmg = apdmg + (GotBuff(myHero, "LeonaShieldOfDaybreak") > 0 and 30*GetCastLevel(myHero,_Q)+10+.3*GetBonusAP(myHero) or 0) 
+181   elseif myHeroName == "MasterYi" then 
+182   addmg = addmg + (GotBuff(myHero, "doublestrike") > 0 and .5*(GetBonusDmg(myHero)+GetBaseDamage(myHero)) or 0) 
+183   elseif myHeroName == "Nocturne" then 
+184   addmg = addmg + (GotBuff(myHero, "nocturneumrablades") > 0 and .2*(GetBonusdmg(myHero)+GetBaseDamage(myHero)) or 0) 
+185   elseif myHeroName == "Orianna" then 
+186   apdmg = apdmg + (GotBuff(myHero, "orianaspellsword") > 0 and 8*math.floor((GetLevel(myHero)+2)/3)+2+0.15*GetBonusAP(myHero) or 0) 
+187   elseif myHeroName == "RekSai" then 
+188   addmg = addmg + (GotBuff(myHero, "RekSaiQ") > 0 and 10*GetCastLevel(myHero,_Q)+5+.2*(GetBonusDmg(myHero)+GetBaseDamage(myHero)) or 0) 
+189   elseif myHeroName == "Rengar" then 
+190   addmg = addmg + (GotBuff(myHero, "rengarqbase") > 0 and math.max(30*GetCastLevel(myHero,_Q)+(.05*GetCastLevel(myHero,_Q)-.05)*(GetBonusDmg(myHero)+GetBaseDamage(myHero))) or 0) + (GotBuff(myHero, "rengarqemp") > 0 and math.min(15*GetLevel(myHero)+15,10*GetLevel(myHero)+60)+.5*(GetBonusDmg(myHero)+GetBaseDamage(myHero)) or 0) 
+191   elseif myHeroName == "Shyvana" then 
+192   addmg = addmg + (GotBuff(myHero, "ShyvanaDoubleAttack") > 0 and (.05*GetCastLevel(myHero,_Q)+.75)*(GetBonusDmg(myHero)+GetBaseDamage(myHero)) or 0) 
+193   elseif myHeroName == "Talon" then 
+194   addmg = addmg + (GotBuff(myHero, "talonnoxiandiplomacybuff") > 0 and 30*GetCastLevel(myHero,_Q)+.3*(GetBonusDmg(myHero)) or 0) 
+195   elseif myHeroName == "Trundle" then 
+196   addmg = addmg + (GotBuff(myHero, "TrundleTrollSmash") > 0 and 20*GetCastLevel(myHero,_Q)+((0.05*GetCastLevel(myHero,_Q)+0.095)*(GetBonusDmg(myHero)+GetBaseDamage(myHero))) or 0) 
+197   elseif myHeroName == "Varus" then 
+198   apdmg = apdmg + (GotBuff(myHero, "VarusW") > 0 and (4*GetCastLevel(myHero,_W)+6+.25*GetBonusAP(myHero)) or 0)  
+199   elseif myHeroName == "Vayne" then 
+200   addmg = addmg + (GotBuff(myHero, "vaynetumblebonus") > 0 and (.05*GetCastLevel(myHero,_Q)+.25)*(GetBonusDmg(myHero)+GetBaseDamage(myHero)) or 0)  
+201   truedmg = truedmg + (GotBuff(to, "vaynesilvereddebuff") > 1 and 10*GetCastLevel(myHero,_W)+10+((1*GetCastLevel(myHero,_W)+3)*GetMaxHP(to)/100) or 0) 
+202   elseif myHeroName == "Vi" then 
+203   addmg = addmg + (GotBuff(myHero, "ViE") > 0 and 15*GetCastLevel(myHero,_E)-10+.15*(GetBonusDmg(myHero)+GetBaseDamage(myHero))+.7*GetBonusAP(myHero) or 0)  
+204   elseif myHeroName == "Volibear" then 
+205   addmg = addmg + (GotBuff(myHero, "VolibearQ") > 0 and 30*GetCastLevel(myHero,_Q) or 0) 
+206   end 
+207   return truedmg + GoS:CalcDamage(myHero, to, GetBonusDmg(myHero)+GetBaseDamage(myHero)+addmg, apdmg) * 0.95 
+208 end 
+209 
+ 
+210 function InspiredsOrbWalker:Orb(target) 
+211   if self:DoAttack() and GoS:ValidTarget(target) and self:TimeToAttack() then 
+212     AttackUnit(target) 
+213   elseif self:DoWalk() and self:TimeToMove() then 
+214     MoveToXYZ(GetMousePos()) 
+215   end 
+216 end 
+217 
+ 
+218 function InspiredsOrbWalker:TimeToMove() 
+219   return (self.lastAttack + GetWindUp(myHero)*1000 + self.Config.cad:Value() < GetTickCount() - GetLatency()/2) or (myHeroName == "Kalista") 
+220 end 
+221 
+ 
+222 function InspiredsOrbWalker:TimeToAttack() 
+223   return self.lastAttack + 1000/self:GetFullAttackSpeed() < GetTickCount() + GetLatency()/2 + 70 
+224 end 
+225 
+ 
+226 function InspiredsOrbWalker:DoAttack() 
+227   return (self.Config.h.Combo:Value() or self.Config.h.Harass:Value() or self.Config.h.LaneClear:Value() or self.Config.h.LastHit:Value()) and self.attacksEnabled 
+228 end 
+229 
+ 
+230 function InspiredsOrbWalker:DoWalk() 
+231   return (self.Config.h.Combo:Value() or self.Config.h.Harass:Value() or self.Config.h.LaneClear:Value() or self.Config.h.LastHit:Value()) and self.movementEnabled 
+232 end 
+233 
+ 
+234 function InspiredsOrbWalker:GetFullAttackSpeed() 
+235   return GetAttackSpeed(myHero)*GetBaseAttackSpeed(myHero) 
+236 end 
+237 
+ 
+238 function InspiredsOrbWalker:ProcessSpell(unit, spell) 
+239   if unit and unit == myHero and spell and spell.name then 
+240     if spell.name:lower():find("attack") or self.altAttacks[spell.name:lower()] then 
+241       self.lastAttack = GetTickCount() - GetLatency()/2 
+242       GoS:DelayAction(function()  
+243         if self.Config.items:Value() and (self.Config.h.Combo:Value() or self.Config.h.Harass:Value()) then 
+244           GoS:CastOffensiveItems(self.Target)  
+245         end 
+246       end, GetWindUp(myHero)*1000) 
+247     end 
+248     if self.resetAttacks[spell.name:lower()] then 
+249       self.lastAttack = GetTickCount() + spell.windUpTime * 1000 + 70 + GetLatency() - 1000/self:GetFullAttackSpeed() 
+250     end 
+251   end 
+252 end 
+253 
+ 
+254 function InspiredsOrbWalker:ProcessWaypoint(Object,way) 
+255   if Object == myHero and not self:TimeToMove() and way.index > 2 then 
+256     self.lastAttack = 0 
+257   end 
+258 end 
+259 
+ 
+260 function InspiredsOrbWalker:EnableAutoAttacks() 
+261   self.attacksEnabled = true 
+262 end 
+263 
+ 
+264 function InspiredsOrbWalker:DisableAutoAttacks() 
+265   self.attacksEnabled = false 
+266 end 
+267 
+ 
+268 function InspiredsOrbWalker:EnableMovement() 
+269   self.movementEnabled = true 
+270 end 
+271 
+ 
+272 function InspiredsOrbWalker:DisableMovement() 
+273   self.movementEnabled = false 
+274 end 
+275 
+ 
+276 function InspiredsOrbWalker:EnableOrbwalking() 
+277   self.attacksEnabled = true 
+278   self.movementEnabled = true 
+279 end 
+280 
+ 
+281 function InspiredsOrbWalker:DisableOrbwalking() 
+282   self.attacksEnabled = false 
+283   self.movementEnabled = false 
+284 end 
+285 
+ 
+286 _G.IOW = InspiredsOrbWalker() 
 
-# luarocks build files
-*.src.rock
-*.zip
-*.tar.gz
-
-# Object files
-*.o
-*.os
-*.ko
-*.obj
-*.elf
-
-# Precompiled Headers
-*.gch
-*.pch
-
-# Libraries
-*.lib
-*.a
-*.la
-*.lo
-*.def
-*.exp
-
-# Shared objects (inc. Windows DLLs)
-*.dll
-*.so
-*.so.*
-*.dylib
-
-# Executables
-*.exe
-*.out
-*.app
-*.i*86
-*.x86_64
-*.hex
-
+  
